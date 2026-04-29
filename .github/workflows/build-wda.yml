@@ -1,0 +1,82 @@
+name: Build WebDriverAgent IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # 列出可用 Xcode 版本
+          ls -d /Applications/Xcode*.app || true
+          # 选择 Xcode 15.x
+          XCODE_PATH=$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          fi
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH"
+          xcodebuild -version
+
+      - name: Build WebDriverAgent
+        run: |
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS="arm64 arm64e" \
+            ONLY_ACTIVE_ARCH=NO \
+            2>&1 | tail -50
+
+      - name: Package IPA
+        run: |
+          echo "=== 查找编译产物 ==="
+          find ./DerivedData -name "*.app" -type d
+          
+          APP_PATH=$(find ./DerivedData -name "*Runner*.app" -path "*/iphoneos/*" -type d | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find ./DerivedData -name "*.app" -path "*/iphoneos/*" -type d | head -1)
+          fi
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: 找不到 .app 文件!"
+            find ./DerivedData -type d -name "*.app"
+            exit 1
+          fi
+          
+          echo "打包: $APP_PATH"
+          
+          # 查看 Info.plist 获取 Bundle ID
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist" || true
+          
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          
+          # 同时打包 xctest 插件（如果有）
+          XCTEST_PATH=$(find ./DerivedData -name "*.xctest" -path "*/iphoneos/*" -type d | head -1)
+          if [ -n "$XCTEST_PATH" ]; then
+            echo "找到 xctest: $XCTEST_PATH"
+            PLUGINS_DIR="Payload/$(basename $APP_PATH)/PlugIns"
+            mkdir -p "$PLUGINS_DIR"
+            cp -r "$XCTEST_PATH" "$PLUGINS_DIR/"
+          fi
+          
+          zip -r WebDriverAgent.ipa Payload/
+          echo "=== IPA 创建成功! ==="
+          ls -la WebDriverAgent.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgent-IPA
+          path: WebDriverAgent.ipa
+          retention-days: 90
