@@ -35,7 +35,7 @@ jobs:
           -derivedDataPath ./build \
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGN_IDENTITY="" \
-          ARCHS="arm64 arm64e" \
+          ARCHS="arm64" \
           ONLY_ACTIVE_ARCH=NO \
           DEVELOPMENT_TEAM="" \
           PROVISIONING_PROFILE="" \
