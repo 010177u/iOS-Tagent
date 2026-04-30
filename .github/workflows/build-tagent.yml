@@ -1,0 +1,83 @@
+name: Build iOS-Tagent IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master, main ]
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Select Xcode
+      run: |
+        sudo xcode-select -s /Applications/Xcode_15.4.app || \
+        sudo xcode-select -s /Applications/Xcode_15.3.app || \
+        sudo xcode-select -s /Applications/Xcode.app
+        xcodebuild -version
+        echo "SDK:"
+        xcodebuild -showsdks | grep iphoneos
+
+    - name: Build for Testing
+      run: |
+        echo "=== 开始编译 iOS-Tagent ==="
+        xcodebuild build-for-testing \
+          -project WebDriverAgent.xcodeproj \
+          -scheme WebDriverAgentRunner \
+          -sdk iphoneos \
+          -configuration Release \
+          -derivedDataPath ./build \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGN_IDENTITY="" \
+          ARCHS="arm64 arm64e" \
+          ONLY_ACTIVE_ARCH=NO \
+          DEVELOPMENT_TEAM="" \
+          PROVISIONING_PROFILE="" \
+          2>&1 | tail -50
+        echo "=== 编译完成 ==="
+
+    - name: Package IPA
+      run: |
+        echo "=== 查找编译产物 ==="
+        find ./build -name "*.app" -type d | head -20
+
+        RUNNER_APP=$(find ./build -path "*/Release-iphoneos/WebDriverAgentRunner-Runner.app" -type d | head -1)
+        if [ -z "$RUNNER_APP" ]; then
+          RUNNER_APP=$(find ./build -path "*/Debug-iphoneos/WebDriverAgentRunner-Runner.app" -type d | head -1)
+        fi
+        if [ -z "$RUNNER_APP" ]; then
+          RUNNER_APP=$(find ./build -name "*Runner*.app" -type d | head -1)
+        fi
+
+        if [ -z "$RUNNER_APP" ]; then
+          echo "ERROR: 未找到 Runner.app"
+          find ./build -name "*.app" -type d
+          exit 1
+        fi
+
+        echo "找到: $RUNNER_APP"
+
+        # 列出 app 内容
+        ls -la "$RUNNER_APP/"
+        echo "Info.plist:"
+        cat "$RUNNER_APP/Info.plist" | head -30 || true
+
+        # 打包 IPA
+        mkdir -p Payload
+        cp -r "$RUNNER_APP" Payload/
+        zip -r iOS-Tagent.ipa Payload/
+        echo "IPA 大小:"
+        ls -la iOS-Tagent.ipa
+
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: iOS-Tagent-IPA
+        path: iOS-Tagent.ipa
+        retention-days: 90
