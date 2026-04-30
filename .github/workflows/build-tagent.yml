@@ -68,6 +68,33 @@ jobs:
         echo "Info.plist:"
         cat "$RUNNER_APP/Info.plist" | head -30 || true
 
+        # === TrollStore 兼容清理 ===
+        # 删除 ldid 不支持的文件类型 (解决 Unsupported Mach-O type)
+        echo "=== TrollStore 兼容清理 ==="
+        find "$RUNNER_APP" -name "*.o" -delete 2>/dev/null && echo "已删除 .o 文件" || true
+        find "$RUNNER_APP" -name "*.metallib" -delete 2>/dev/null && echo "已删除 .metallib" || true
+        find "$RUNNER_APP" -name "*.dSYM" -exec rm -rf {} + 2>/dev/null && echo "已删除 .dSYM" || true
+        find "$RUNNER_APP" -name "*.bcmap" -delete 2>/dev/null || true
+        find "$RUNNER_APP" -name "*.car" -type f | while read f; do
+          file_type=$(file -b "$f" 2>/dev/null)
+          echo "  检查: $f -> $file_type"
+        done
+
+        # 用 lipo 确保所有二进制只包含 arm64
+        find "$RUNNER_APP" -type f | while read f; do
+          file_type=$(file -b "$f" 2>/dev/null)
+          if echo "$file_type" | grep -q "Mach-O"; then
+            archs=$(lipo -info "$f" 2>/dev/null | sed 's/.*: //')
+            echo "  Mach-O: $f [$archs]"
+            if echo "$archs" | grep -q "arm64e"; then
+              echo "    -> 瘦身为 arm64"
+              lipo -thin arm64 "$f" -output "${f}.thin" 2>/dev/null && mv "${f}.thin" "$f" || true
+            fi
+          fi
+        done
+
+        echo "=== 清理完成 ==="
+
         # 打包 IPA
         mkdir -p Payload
         cp -r "$RUNNER_APP" Payload/
